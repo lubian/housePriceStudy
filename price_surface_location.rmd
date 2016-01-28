@@ -1,0 +1,112 @@
+---
+title: "price_surface_location"
+output: html_document
+---
+
+
+import the raw data from csv file and verify the data type of each column
+```{r}
+library(MASS)
+library(ISLR)
+setwd("/Users/lulu/BIGDATA/seloger_mining/data-csv/samples")
+dat_ori=read.csv("details.csv",header = TRUE)
+#dat_ori=dat_ori[idAnnonce!="idAnnonce",]
+#attach(dat_ori)
+#linear regression prix~surface+nbPieces+cp+siLotNeuf+consoEnergie+bilanCOnsoEnergie
+str(dat_ori)
+dat_ori$idAnnonce=as.factor(dat_ori$idAnnonce)
+dat_ori$cp=as.factor(dat_ori$cp)
+```
+
+*plot data and remove outliers and duplicates
+*surface>=400 is regarded as outlier
+*to remove duplicates: sort by column dtFraicheur in decreasing order and then apply the function duplicated on idAnnonce
+```{r}
+plot(prix~surface,log= "",data=dat_ori)
+#boxplot(prix~nbPieces,data=dat_ori)
+#boxplot(prix~bilanConsoEnergie,data=dat_ori)
+
+dat_ori.surfaceOutlier=dat_ori[dat_ori$surface>=400,]
+dat_ori.surfaceSubset=dat_ori[dat_ori$surface<400,]
+
+dat_ori.surfaceSubset$dtFraicheur=strptime(dat_ori.surfaceSubset$dtFraicheur, "%Y-%m-%dT%H:%M:%S",tz="Europe/Paris")
+index_dec=order(dat_ori.surfaceSubset$dtFraicheur,decreasing=TRUE)
+dat_ori.surfaceSubset=dat_ori.surfaceSubset[index_dec,]
+length(dat_ori.surfaceSubset$idAnnonce) # 9064 
+dat.uniq=dat_ori.surfaceSubset[!duplicated(dat_ori.surfaceSubset$idAnnonce),]#9058 rows?
+```
+
+look at two major predictors: surface, location
+when ploting prix with the variable surface, we see there are more than one patterns, which is probably due to locations, we need to segregate the data by cp. There are 159 different "code postale" and 9058 samples.
+first of all, we put cp with less or equal than 50 samples in a group called dat.minor and the rest in another super group dat.major, the plot show there are still more than one pattern in dat.major.
+```{r}
+plot(prix~surface,data=dat.uniq,ylim=c(0,2000000))
+fit1=lm(prix~surface,data=dat.uniq)
+points(dat.uniq$surface,fitted(fit1),col="red",pch=20)
+abline(fit1,col="red")
+# to refine the data collect by location
+rank=sort(table(dat.uniq$cp))
+#ileFrance=c("75","77","78","91","92","93","94","95")
+dat.minor=dat.uniq[dat.uniq$cp %in% names(rank[rank<=50]),]
+dat.major=dat.uniq[dat.uniq$cp %in% names(rank[rank>50]),]
+# a function given a dataset, calculate the coifficient of surface using simple linear regression
+plotwithreg<-function(dataset,name){
+  plot(prix~surface,data=dataset,xlim=c(0,400),ylim=c(0,2000000),main=paste("linear regression on dataset",name))
+  fit1=lm(prix~surface,data=dataset)
+  points(dataset$surface,fitted(fit1),col="red",pch=20)
+  return(fit1)
+}
+par(mfrow=c(1,2))
+fit.minor=plotwithreg(dataset = dat.minor,name="dat.minor")
+fit.major=plotwithreg(dataset = dat.major,name="dat.major")
+
+```
+
+Next,we will separate the dataset into subset by the column cp.
+linearity is visualized in each section, we could see similarity among certains cities
+```{r}
+library(ggplot2)
+ggplot(dat.major)+geom_point(aes(x=surface,y=prix,colour=cp))+facet_wrap(~cp) 
+
+```
+
+apply simple linear regression to each subset according to cp
+we see the coefficient of surface which represent the rise of price per square meter.
+```{r}
+
+
+rank.major=names(rank[rank>50])
+score <- data.frame(cp=character(),intercept=numeric(),
+                 surface=numeric(),
+                 stringsAsFactors=FALSE)
+for (i in 1:length(rank.major))
+{
+  subset=dat.major[dat.major$cp==rank.major[i],]
+  fit=lm(prix~surface,data=subset)
+  score[i,]=c(rank.major[i],coef(fit))
+}
+
+score$surface=as.numeric(score$surface)
+score[order(score$surface,decreasing = TRUE),]
+
+
+```
+
+Next we add another predictor:nbPieces to recalculate. The result is less interpreble.
+```{r}
+score2 <- data.frame(cp=character(),intercept=numeric(),
+                 surface=numeric(),
+                 nbPieces=numeric(),
+                 surface_nbPieces=numeric(),
+                 stringsAsFactors=FALSE)
+for (i in 1:length(rank.major))
+{
+  subset=dat.major[dat.major$cp==rank.major[i],]
+  fit=lm(prix~surface*nbPieces,data=subset)
+  score2[i,]=c(rank.major[i],coef(fit))
+}
+
+score2$surface=as.numeric(score2$surface)
+score2[order(score2$surface,decreasing = TRUE),]
+
+```
